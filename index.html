@@ -795,7 +795,7 @@ var TPLS={
  ];
  packs.forEach(function(p,i){var top=i%4===0, low=i%7===0;TPLS['refined'+i]={name:p[0],desc:p[1]+' clock · '+p[2],dial:top?'top':(low?'low':'center'),style:p[1],pal:p[2],size:[.80,.84,.88,.92][i%4],dx:0,dy:top?8:(low?-8:-8),grad:false};});
 })();
-var activeTpl='greyOutline',dialKey='center',palKey='white',styleKey='bold',sizeV=1,dialDX=0,dialDY=0,alignH='template',alignV='template',gradientOn=false,includeDial=true,img=null,zoom=1,cx=0,cy=0,built=null,dragging=null,timer=null,gcache={},gcount=0;
+var activeTpl='greyOutline',dialKey='center',palKey='white',styleKey='bold',sizeV=1,dialDX=0,dialDY=0,alignH='template',alignV='template',gradientOn=false,includeDial=true,img=null,zoom=1,cx=0,cy=0,built=null,dragging=null,timer=null,gcache={},gpre={},gcount=0;
 var custom={h:'#ffffff',m:'#c9f5dc'},tgt='both',wh={h:0,s:0,v:1},wdrag=false;
 var edit=$('edit'),ectx=edit.getContext('2d');
 var small=document.createElement('canvas');small.width=W;small.height=H;var sctx=small.getContext('2d',{willReadFrequently:true});
@@ -828,7 +828,8 @@ function glyph(role,d,w,h,slot,lk,sk){
   if(alignH!=='template')al[0]=alignH==='left'?0:(alignH==='right'?1:.5);
   if(alignV!=='template')al[1]=alignV==='top'?0:(alignV==='bottom'?1:.5);
   var glyphScaleKey=sizeV<.999?Math.round(sizeV*1000)/1000:1;
-  var key=k+fill+role+d+'x'+w+'x'+h+al.join('')+glyphScaleKey+'g'+gradientOn+pl.join('');if(gcache[key])return gcache[key];
+  var key0=k+fill+role+d+'x'+w+'x'+h+al.join('')+'g'+gradientOn+pl.join(''),key=key0+glyphScaleKey;if(gcache[key])return gcache[key];
+  var pre=gpre[key0];if(!pre){
   var light=lum(fill)>0.55,line=light?'#150c0d':'#ffffff',ch=String(d),m=k==='sticker'||k==='double'||k==='pop'?8:k==='glass'||k==='block'||k==='plate'?9:k==='glitch'?7:5;
   gc.width=w;gc.height=h;gx.clearRect(0,0,w,h);
   gx.font=fnt(100,k);var m0=gx.measureText('0'),dh=(m0.actualBoundingBoxAscent+m0.actualBoundingBoxDescent)||70;
@@ -899,6 +900,9 @@ function glyph(role,d,w,h,slot,lk,sk){
     var td=tx.getImageData(0,0,tw,th);for(var q=3;q<td.data.length;q+=4)td.data[q]=td.data[q]>=110?255:0;tx.putImageData(td,0,0);
     gx.clearRect(0,0,w,h);gx.imageSmoothingEnabled=false;gx.drawImage(tc,0,0,tw,th,0,0,tw*f,th*f)}
 
+  gpre[key0]=gx.getImageData(0,0,w,h);
+  }else{gc.width=w;gc.height=h;gx.putImageData(pre,0,0)}
+
   /* Proportional whole-dial scaling:
      Never move a digit inside its own sprite just because the complete dial
      touches an edge. Doing that changes the spacing of individual digits and
@@ -917,7 +921,7 @@ function glyph(role,d,w,h,slot,lk,sk){
   }
   var data=new Uint8ClampedArray(gx.getImageData(0,0,w,h).data);
   if(SOFT[k])for(var i=3;i<data.length;i+=4)data[i]=Math.round(data[i]/51)*51;
-  if(++gcount>300){gcache={};gcount=0}
+  if(++gcount>300){gcache={};gpre={};gcount=0}
   return(gcache[key]=data);
 }
 function digits(){var d=new Date(),h=d.getHours(),m=d.getMinutes();return[h/10|0,h%10,m/10|0,m%10]}
@@ -929,7 +933,16 @@ function draw(){
   ectx.drawImage(small,0,0,edit.width,edit.height);
 }
 var stctx=$('tddthumb').getContext('2d');
-function baseData(ctx){if(img)paint(ctx);else placeholder(ctx);return ctx.getImageData(0,0,W,H)}
+var baseCache=null,baseKey='',imgSeq=0;
+/* The photo only needs repainting when the photo, zoom or pan changes. Sliders (size, position, colour) reuse this. */
+function baseData(ctx){
+  var k=img?(img._bid||(img._bid=++imgSeq))+'|'+zoom+'|'+cx+'|'+cy:'ph';
+  if(baseCache&&baseKey===k)return baseCache;
+  if(img)paint(ctx);else placeholder(ctx);
+  baseCache=ctx.getImageData(0,0,W,H);baseKey=k;return baseCache}
+function shrink(im){var m=Math.max(im.width,im.height),M=1400;if(m<=M)return im;
+  var s=M/m,c=document.createElement('canvas');c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);
+  var x=c.getContext('2d');x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(im,0,0,c.width,c.height);return c}
 /* Scale the COMPLETE dial as one rigid layout.
    Digit size and digit spacing use the same scale factor, so the selected
    template keeps exactly the same proportions when made smaller. */
@@ -988,43 +1001,21 @@ function clampDialMove(){
   $('dialx').min=Math.ceil(b.minDX);$('dialx').max=Math.floor(b.maxDX);$('dialx').value=dialDX;
   $('dialy').min=Math.ceil(b.minDY);$('dialy').max=Math.floor(b.maxDY);$('dialy').value=dialDY;
 }
+var cmpC=document.createElement('canvas');cmpC.width=W;cmpC.height=H;var cmpX=cmpC.getContext('2d',{willReadFrequently:true});
+var spC=document.createElement('canvas');spC.width=SW;spC.height=SH;var spX=spC.getContext('2d',{willReadFrequently:true});
 function compose(base,key,sk){
-  /* Draw the dial at its final scale directly onto the finished preview.
-     This avoids the old >100% path, which first drew into a 120x240 layer.
-     At large scales that intermediate layer clipped the dial and could make
-     the preview appear black/disappear. */
-  var id=new ImageData(new Uint8ClampedArray(base.data),W,H);
-  if(!includeDial)return id;
-  var pos=movedPos(key);if(!pos)return id;
-  var dg=digits();
-  var renderScale=effectiveDialScale(key);
-  if(renderScale>1.001){
-    var out=document.createElement('canvas');out.width=W;out.height=H;
-    var oc=out.getContext('2d');oc.putImageData(id,0,0);
-    oc.imageSmoothingEnabled=true;oc.imageSmoothingQuality='high';
-    for(var k=0;k<4;k++){
-      var gl=glyph(k<2?'h':'m',dg[k],SW,SH,k,key,sk);
-      var tmp=document.createElement('canvas');tmp.width=SW;tmp.height=SH;
-      tmp.getContext('2d').putImageData(new ImageData(gl,SW,SH),0,0);
-      oc.drawImage(tmp,pos[k][0],pos[k][1],SW*renderScale,SH*renderScale);
-    }
-    return oc.getImageData(0,0,W,H);
-  }
-  var out=document.createElement('canvas');out.width=W;out.height=H;
-  var oc=out.getContext('2d');oc.putImageData(id,0,0);
-  oc.imageSmoothingEnabled=true;oc.imageSmoothingQuality='high';
+  /* Dial is drawn at its final scale straight onto the finished preview (scratch canvases are reused). */
+  var pos=includeDial?movedPos(key):null;
+  if(!pos)return new ImageData(new Uint8ClampedArray(base.data),W,H);
+  var dg=digits(),sc=effectiveDialScale(key);
+  cmpX.putImageData(base,0,0);
+  cmpX.imageSmoothingEnabled=true;cmpX.imageSmoothingQuality='high';
   for(var k=0;k<4;k++){
     var gl=glyph(k<2?'h':'m',dg[k],SW,SH,k,key,sk);
-    var tmp=document.createElement('canvas');tmp.width=SW;tmp.height=SH;
-    tmp.getContext('2d').putImageData(new ImageData(gl,SW,SH),0,0);
-    var sc=renderScale;
-    /* Draw the entire glyph sprite into its scaled footprint.  Previously,
-       scale-down rendered the glyph into a full-size sprite and then placed
-       that sprite at the smaller dial position. The visible pixels therefore
-       stayed at the old top-left and could be clipped or appear to vanish. */
-    oc.drawImage(tmp,pos[k][0],pos[k][1],Math.max(1,SW*sc),Math.max(1,SH*sc));
+    spX.putImageData(new ImageData(gl,SW,SH),0,0);
+    cmpX.drawImage(spC,pos[k][0],pos[k][1],Math.max(1,SW*sc),Math.max(1,SH*sc));
   }
-  return oc.getImageData(0,0,W,H);
+  return cmpX.getImageData(0,0,W,H);
 }
 function show(id){sctx.putImageData(id,0,0);draw()}
 function refreshTriggerThumbs(){var base=baseData(bcx);try{var t=TPLS[activeTpl];if(t){var od=dialKey,os=styleKey,oz=sizeV,ox=dialDX,oy=dialDY,op=palKey,og=gradientOn;dialKey=orientedDial(t);styleKey=t.style;sizeV=t.size;dialDX=t.dx;dialDY=t.dy;palKey=t.pal;gradientOn=!!t.grad;stctx.putImageData(compose(base,dialKey,t.style),0,0);dialKey=od;styleKey=os;sizeV=oz;dialDX=ox;dialDY=oy;palKey=op;gradientOn=og}}catch(_){}}
@@ -1056,11 +1047,21 @@ function rgb2hsv(r,g,b){r/=255;g/=255;b/=255;var mx=Math.max(r,g,b),mn=Math.min(
   return{h:h,s:mx?d/mx:0,v:mx}}
 function toHex(c){return'#'+c.map(function(x){return('0'+x.toString(16)).slice(-2)}).join('')}
 function fromHex(h){var n=parseInt(h.slice(1),16);return[n>>16,(n>>8)&255,n&255]}
-function drawWheel(){
-  var R=100,id=wx.createImageData(200,200),d=id.data;
+var wBase=null,wId=null,wIdV=-1;
+function wheelBase(){
+  if(wBase)return wBase;var R=100;wBase=new Float32Array(200*200*4);
   for(var y=0;y<200;y++)for(var x=0;x<200;x++){var dx=x-99.5,dy=y-99.5,dist=Math.sqrt(dx*dx+dy*dy),o=(y*200+x)*4;
-    if(dist<=R){var c=hsv2rgb((Math.atan2(dy,dx)*180/Math.PI+360)%360,dist/R,wh.v);d[o]=c[0];d[o+1]=c[1];d[o+2]=c[2];d[o+3]=255}}
-  wx.putImageData(id,0,0);
+    if(dist<=R){var h=(Math.atan2(dy,dx)*180/Math.PI+360)%360,sa=dist/R;
+      for(var c=0;c<3;c++){var n=[5,3,1][c],kk=(n+h/60)%6;wBase[o+c]=255*(1-sa*Math.max(0,Math.min(kk,4-kk,1)))}
+      wBase[o+3]=255}}
+  return wBase}
+function drawWheel(){
+  var R=100;
+  if(!wId)wId=wx.createImageData(200,200);
+  if(wIdV!==wh.v){var b=wheelBase(),d=wId.data;
+    for(var o=0;o<d.length;o+=4){if(b[o+3]){d[o]=Math.round(b[o]*wh.v);d[o+1]=Math.round(b[o+1]*wh.v);d[o+2]=Math.round(b[o+2]*wh.v);d[o+3]=255}}
+    wIdV=wh.v}
+  wx.putImageData(wId,0,0);
   var a=wh.h*Math.PI/180,mx=100+Math.cos(a)*wh.s*R,my=100+Math.sin(a)*wh.s*R;
   wx.lineWidth=3;wx.strokeStyle='#000';wx.beginPath();wx.arc(mx,my,8,0,7);wx.stroke();
   wx.lineWidth=2;wx.strokeStyle='#fff';wx.beginPath();wx.arc(mx,my,8,0,7);wx.stroke();
@@ -1070,7 +1071,8 @@ function loadWheel(){var c=fromHex(tgt==='m'?custom.m:custom.h),v=rgb2hsv(c[0],c
 function applyWheel(){
   var hex=toHex(hsv2rgb(wh.h,wh.s,wh.v));
   if(tgt!=='m')custom.h=hex;if(tgt!=='h')custom.m=hex;
-  palKey='custom';drawWheel();sync();redraw();
+  palKey='custom';
+  if(!applyWheel._raf)applyWheel._raf=requestAnimationFrame(function(){applyWheel._raf=0;drawWheel();sync();redraw()});
 }
 function wheelAt(e){var r=wc.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*200-100,y=(e.clientY-r.top)/r.height*200-100;
   wh.h=(Math.atan2(y,x)*180/Math.PI+360)%360;wh.s=Math.min(1,Math.sqrt(x*x+y*y)/100);applyWheel()}
@@ -1084,7 +1086,7 @@ function orientedDial(t){return t&&t.dial?t.dial:'center'}
 function applyTemplate(k){
   var t=TPLS[k];if(!t)return;activeTpl=k;dialKey=orientedDial(t);styleKey=t.style;palKey=t.pal;sizeV=t.size;dialDX=t.dx;dialDY=t.dy;alignH='template';alignV='template';gradientOn=!!t.grad;
   updateSizeLimit();$('size').value=Math.min(+$('size').max,Math.round(sizeV*100));sizeV=+$('size').value/100;if(PALS[palKey]){custom.h=PALS[palKey][0];custom.m=PALS[palKey][1]}
-  gcache={};clampDialMove();sync();redraw();
+  gcache={};gpre={};clampDialMove();sync();redraw();
 }
 function clearTemplate(){/* manual edits keep the last chosen template visible */}
 function sync(){
@@ -1096,7 +1098,7 @@ function sync(){
   $('includedial').checked=includeDial;
   $('size').disabled=!on||!includeDial;$('sizeval').textContent=Math.round(sizeV*100)+'%';$('dialx').disabled=!on||!includeDial;$('dialy').disabled=!on||!includeDial;$('dialreset').disabled=!on||!includeDial;$('dialxval').textContent=(dialDX>0?'+':'')+Math.round(dialDX);$('dialyval').textContent=(dialDY>0?'+':'')+Math.round(dialDY);
   if(!on)$('wheelbox').hidden=true;
-  clearTimeout(sync._thumbTimer);sync._thumbTimer=setTimeout(refreshTriggerThumbs,40);
+  clearTimeout(sync._thumbTimer);sync._thumbTimer=setTimeout(refreshTriggerThumbs,180);
 }
 var dds=[];
 function makeDD(p,keys,label,cur,set,thumb,count,off){
@@ -1187,7 +1189,7 @@ $('pick').onclick=pick;
 edit.onclick=function(){if(!img)pick()};
 edit.onkeydown=function(e){if(!img&&(e.key==='Enter'||e.key===' ')){e.preventDefault();pick()}};
 $('file').onchange=function(e){var f=e.target.files[0];if(!f)return;var u=URL.createObjectURL(f),im=new Image();
-  im.onload=function(){img=im;zoom=1;$('zoom').value=1;$('zoom').disabled=false;cx=im.width/2;cy=im.height/2;edit.classList.add('on');
+  im.onload=function(){img=shrink(im);baseCache=null;zoom=1;$('zoom').value=1;$('zoom').disabled=false;cx=img.width/2;cy=img.height/2;edit.classList.add('on');
     $('pick').textContent='Change photo';$('hint').textContent='Drag the screen to move the photo';redraw()};
   im.onerror=function(){msg('That file could not be read as an image.',true)};im.src=u};
 function setZoom(v){if(!img)return;zoom=Math.max(1,Math.min(4,+v||1));$('zoom').value=zoom;instant();msg('Zoom '+Math.round(zoom*100)+'%');clearTimeout(timer);timer=setTimeout(build,350)}
@@ -1224,7 +1226,7 @@ $('dl').onclick=async function(){
 
 /* keep the clock on the preview moving */
 setInterval(function(){if(built)showBuilt();else if(!dragging&&!wdrag)instant()},15000);
-if(document.fonts&&document.fonts.load){document.fonts.load('700 40px "Barlow Condensed"').then(function(){gcache={};redraw()},function(){})}
+if(document.fonts&&document.fonts.load){document.fonts.load('700 40px "Barlow Condensed"').then(function(){gcache={};gpre={};redraw()},function(){})}
 updateSizeLimit();sync();redraw();
 })();
 </script>
